@@ -17,16 +17,6 @@ Perfect for prediction markets, DeFi, and any application requiring trustless ex
 - 🔐 **Trustless** - Verifiable, immutable results
 - 🚀 **Production Ready** - Error handling, logging, tests
 
-## 📚 Documentation
-
-- **[Summary](SUMMARY.md)** - Implementation complete overview ⭐
-- **[Quick Reference](QUICKREF.md)** - Commands and API cheat sheet
-- **[Project Structure](PROJECT-STRUCTURE.md)** - File organization
-- **[Architecture](ARCHITECTURE.md)** - System design and diagrams
-- **[Implementation](IMPLEMENTATION.md)** - What was built and how it works
-- **[Contract Docs](contracts/README.md)** - Smart contract details
-- **[Changelog](CHANGELOG.md)** - Version history and updates
-
 ## Quick Start
 
 ### Using Make (recommended)
