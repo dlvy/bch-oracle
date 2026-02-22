@@ -1,0 +1,252 @@
+BCH ORACLE - COMPLETE DATA FLOW
+================================
+
+┌─────────────────────────────────────────────────────────────────────────┐
+│                          USER CREATES TASK                              │
+│                                                                         │
+│  curl -X POST /tasks -d '{                                             │
+│    "name": "BCH > $500?",                                              │
+│    "source_url": "https://api.coinbase.com/...",                       │
+│    "prompt": "Is BCH above $500? {content}",                           │
+│    "parse_rule": "yes_no",                                             │
+│    "interval_seconds": 3600                                            │
+│  }'                                                                     │
+└────────────────────────────────┬────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      ROUTER CREATES TASK IN DB                          │
+│                                                                         │
+│  INSERT INTO tasks (name, source_url, prompt, ...)                     │
+│  VALUES ('BCH > $500?', 'https://...', ...)                            │
+│                                                                         │
+│  Returns: { "id": 1, "name": "BCH > $500?", ... }                      │
+└────────────────────────────────┬────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    WORKER SPAWNS OTP SCHEDULER                          │
+│                                                                         │
+│  spawn_task_loop(conn, task_id=1)                                      │
+│    ↓                                                                    │
+│  New Erlang process created                                            │
+│  Runs every 3600 seconds                                               │
+└────────────────────────────────┬────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      USER DEPLOYS CONTRACT                              │
+│                                                                         │
+│  curl -X POST /tasks/1/deploy-contract                                 │
+└────────────────────────────────┬────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    BCH MODULE DEPLOYS CONTRACT                          │
+│                                                                         │
+│  bch.deploy_contract(1)                                                │
+│    ↓                                                                    │
+│  Spawns: node deploy.js 1                                              │
+│    ↓                                                                    │
+│  CashScript compiles oracle.cash                                       │
+│    ↓                                                                    │
+│  Contract deployed to BCH address                                      │
+│    ↓                                                                    │
+│  Saves: contracts/artifacts/contract-1.json                            │
+└────────────────────────────────┬────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    SCHEDULER TRIGGERS TASK                              │
+│                                                                         │
+│  Every 3600 seconds:                                                   │
+│    run_task(conn, task)                                                │
+└────────────────────────────────┬────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      STEP 1: FETCH URL                                  │
+│                                                                         │
+│  HTTP GET https://api.coinbase.com/v2/prices/BCH-USD/spot             │
+│    ↓                                                                    │
+│  Response: {"data":{"amount":"425.50","currency":"USD"}}               │
+│    ↓                                                                    │
+│  Extract first 4000 chars                                              │
+└────────────────────────────────┬────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    STEP 2: BUILD PROMPT                                 │
+│                                                                         │
+│  Template: "Is BCH above $500? {content}"                              │
+│    ↓                                                                    │
+│  Replace {content} with fetched data                                   │
+│    ↓                                                                    │
+│  Final: "Is BCH above $500? {"data":{"amount":"425.50",...}}"          │
+└────────────────────────────────┬────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                      STEP 3: CALL LLM                                   │
+│                                                                         │
+│  POST https://api.openai.com/v1/chat/completions                       │
+│  {                                                                      │
+│    "model": "gpt-4o-mini",                                             │
+│    "messages": [{"role": "user", "content": "Is BCH..."}]              │
+│  }                                                                      │
+│    ↓                                                                    │
+│  Response: {"choices":[{"message":{"content":"NO"}}]}                  │
+└────────────────────────────────┬────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    STEP 4: PARSE RESPONSE                               │
+│                                                                         │
+│  Raw: "NO"                                                             │
+│  Parse rule: yes_no                                                    │
+│    ↓                                                                    │
+│  parser.parse("NO", YesNo)                                             │
+│    ↓                                                                    │
+│  Parsed: "no"                                                          │
+└────────────────────────────────┬────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                  STEP 5: SAVE TO DATABASE                               │
+│                                                                         │
+│  INSERT INTO results (task_id, raw_response, parsed_value, ...)        │
+│  VALUES (1, 'NO', 'no', 1, '', datetime('now'))                        │
+│    ↓                                                                    │
+│  Returns: OracleResult { id: 42, task_id: 1, ... }                     │
+└────────────────────────────────┬────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│              STEP 6: PUBLISH ON-CHAIN (if enabled)                      │
+│                                                                         │
+│  if BCH_PUBLISH_ENABLED == "true":                                     │
+│    bch.publish_result(result)                                          │
+│      ↓                                                                  │
+│    Spawns: node publish.js 1 1708617600 "no"                           │
+│      ↓                                                                  │
+│    Loads contract artifact                                             │
+│      ↓                                                                  │
+│    Loads oracle private key (BCH_ORACLE_WIF)                           │
+│      ↓                                                                  │
+│    Builds transaction:                                                 │
+│      - Input: Contract UTXO                                            │
+│      - Output 0: OP_RETURN <ORCL><1><timestamp><"no">                  │
+│      - Output 1: Dust back to contract                                 │
+│      ↓                                                                  │
+│    Signs with oracle key                                               │
+│      ↓                                                                  │
+│    Broadcasts to BCH network                                           │
+│      ↓                                                                  │
+│    Returns: { txid: "abc123...", explorerUrl: "https://..." }          │
+└────────────────────────────────┬────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    RESULT NOW AVAILABLE                                 │
+│                                                                         │
+│  Via API:                                                              │
+│    curl http://localhost:8080/tasks/1/results                          │
+│    → [{"parsed_value": "no", "executed_at": "...", ...}]               │
+│                                                                         │
+│  On Blockchain:                                                        │
+│    node read-onchain.js 1                                              │
+│    → TX abc123... contains OP_RETURN with "no"                         │
+│                                                                         │
+│  Anyone can verify:                                                    │
+│    - Visit block explorer                                              │
+│    - Query Electrum server                                             │
+│    - Use Chaingraph API                                                │
+└─────────────────────────────────────────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────────┐
+│                    SCHEDULER SLEEPS                                     │
+│                                                                         │
+│  process.sleep(3600 * 1000)  // 1 hour                                │
+│    ↓                                                                    │
+│  Then repeats from "SCHEDULER TRIGGERS TASK"                           │
+└─────────────────────────────────────────────────────────────────────────┘
+
+
+KEY COMPONENTS:
+===============
+
+1. HTTP API (router.gleam)
+   - Handles REST requests
+   - Creates/manages tasks
+   - Triggers deployments
+
+2. Database (db.gleam)
+   - SQLite persistence
+   - Stores tasks and results
+   - Provides CRUD operations
+
+3. Scheduler (worker.gleam)
+   - OTP process per task
+   - Runs on interval
+   - Isolated failures
+
+4. LLM Client (llm.gleam)
+   - Fetches URL content
+   - Calls OpenAI API
+   - Returns response
+
+5. Parser (parser.gleam)
+   - Extracts values
+   - Four strategies
+   - Error handling
+
+6. BCH Bridge (bch.gleam)
+   - Spawns Node.js
+   - Publishes on-chain
+   - Parses responses
+
+7. Smart Contract (oracle.cash)
+   - Verifies signatures
+   - Creates OP_RETURN
+   - Stores results
+
+
+DATA FORMATS:
+=============
+
+Task JSON:
+{
+  "id": 1,
+  "name": "BCH > $500?",
+  "source_url": "https://...",
+  "prompt": "Is BCH above $500? {content}",
+  "parse_rule": "yes_no",
+  "interval_seconds": 3600,
+  "active": true,
+  "created_at": "2024-02-22T10:00:00Z"
+}
+
+Result JSON:
+{
+  "id": 42,
+  "task_id": 1,
+  "raw_response": "NO",
+  "parsed_value": "no",
+  "success": true,
+  "error": "",
+  "executed_at": "2024-02-22T11:00:00Z"
+}
+
+OP_RETURN (hex):
+6a 04 4f52434c 04 00000001 08 0000000065e46a80 02 6e6f
+│  │  │        │  │        │  │                │  │
+│  │  │        │  │        │  │                │  └─ "no" (UTF-8)
+│  │  │        │  │        │  │                └─ 2 bytes length
+│  │  │        │  │        │  └─ timestamp (1708617600)
+│  │  │        │  │        └─ 8 bytes length
+│  │  │        │  └─ task_id = 1
+│  │  │        └─ 4 bytes length
+│  │  └─ "ORCL" protocol ID
+│  └─ 4 bytes length
+└─ OP_RETURN opcode

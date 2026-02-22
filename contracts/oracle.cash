@@ -1,0 +1,39 @@
+// BCH Oracle Contract
+// Stores oracle results on-chain for prediction markets
+//
+// This contract allows an authorized oracle to publish results
+// and allows anyone to read the latest value from the blockchain.
+
+pragma cashscript ^0.10.0;
+
+contract Oracle(
+    pubkey oraclePubkey,
+    int taskId
+) {
+    // Publish a new oracle result
+    // The oracle signs the transaction and includes the result in OP_RETURN
+    function publishResult(sig oracleSig, int timestamp, bytes result) {
+        // Verify oracle signature
+        require(checkSig(oracleSig, oraclePubkey));
+        
+        // Create OP_RETURN output with oracle data
+        // Format: OP_RETURN <protocol_id> <task_id> <timestamp> <result>
+        bytes protocolId = 0x4f52434c; // "ORCL" in hex
+        bytes opReturn = new OutputNullData([
+            protocolId,
+            bytes4(taskId),
+            bytes8(timestamp),
+            result
+        ]);
+        
+        // Require the OP_RETURN output
+        require(tx.outputs[0].value == 0);
+        require(tx.outputs[0].lockingBytecode == opReturn);
+    }
+    
+    // Withdraw funds (oracle maintenance)
+    // Allows the oracle to reclaim dust and manage contract balance
+    function withdraw(sig oracleSig) {
+        require(checkSig(oracleSig, oraclePubkey));
+    }
+}
