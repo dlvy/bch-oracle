@@ -66,44 +66,43 @@ fn execute(
       }
 
       // 3. Persist to database
-      let result = case db.save_result(conn, task.id, raw, parsed, success, err_msg) {
-        Ok(r) -> r
+      case db.save_result(conn, task.id, raw, parsed, success, err_msg) {
         Error(e) -> {
           io.println("[worker] Failed to save result: " <> string.inspect(e))
-          // Return early if we can't save
-          return Error("Database error: " <> string.inspect(e))
+          Error("Database error: " <> string.inspect(e))
         }
-      }
-
-      // 4. Publish on-chain if enabled and successful
-      let publish_enabled =
-        envoy.get("BCH_PUBLISH_ENABLED")
-        |> result.unwrap("false")
-      
-      case publish_enabled == "true" && success {
-        False -> Nil
-        True -> {
-          case bch.publish_result(result) {
-            Ok(pub_success) -> {
-              io.println(
-                "[worker] Published on-chain: "
-                <> pub_success.txid
-                <> " - "
-                <> pub_success.explorer_url,
-              )
-            }
-            Error(e) -> {
-              io.println(
-                "[worker] On-chain publish failed: " <> string.inspect(e),
-              )
+        Ok(result) -> {
+          // 4. Publish on-chain if enabled and successful
+          let publish_enabled =
+            envoy.get("BCH_PUBLISH_ENABLED")
+            |> result.unwrap("false")
+          
+          case publish_enabled == "true" && success {
+            False -> Nil
+            True -> {
+              case bch.publish_result(result) {
+                Ok(pub_success) -> {
+                  io.println(
+                    "[worker] Published on-chain: "
+                    <> pub_success.txid
+                    <> " - "
+                    <> pub_success.explorer_url,
+                  )
+                }
+                Error(e) -> {
+                  io.println(
+                    "[worker] On-chain publish failed: " <> string.inspect(e),
+                  )
+                }
+              }
             }
           }
-        }
-      }
 
-      case success {
-        True -> Ok(Nil)
-        False -> Error(err_msg)
+          case success {
+            True -> Ok(Nil)
+            False -> Error(err_msg)
+          }
+        }
       }
     }
   }

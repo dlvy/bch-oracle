@@ -13,9 +13,9 @@
 ///   GET    /health                   – health check
 
 import gleam/dynamic/decode
+import gleam/http
 import gleam/int
 import gleam/io
-import gleam/json
 import gleam/result
 import gleam/string
 import oracle/bch
@@ -39,9 +39,9 @@ pub fn handle_request(req: Request, ctx: Context) -> Response {
     // Tasks collection
     ["tasks"] ->
       case req.method {
-        wisp.Get -> list_tasks(ctx)
-        wisp.Post -> create_task(req, ctx)
-        _ -> wisp.method_not_allowed([wisp.Get, wisp.Post])
+        http.Get -> list_tasks(ctx)
+        http.Post -> create_task(req, ctx)
+        _ -> wisp.method_not_allowed([http.Get, http.Post])
       }
 
     // Single task
@@ -50,9 +50,9 @@ pub fn handle_request(req: Request, ctx: Context) -> Response {
         Error(_) -> bad_request("Invalid task id: " <> id_str)
         Ok(id) ->
           case req.method {
-            wisp.Get -> get_task(id, ctx)
-            wisp.Delete -> delete_task(id, ctx)
-            _ -> wisp.method_not_allowed([wisp.Get, wisp.Delete])
+            http.Get -> get_task(id, ctx)
+            http.Delete -> delete_task(id, ctx)
+            _ -> wisp.method_not_allowed([http.Get, http.Delete])
           }
       }
 
@@ -74,8 +74,8 @@ pub fn handle_request(req: Request, ctx: Context) -> Response {
         Error(_) -> bad_request("Invalid task id")
         Ok(id) ->
           case req.method {
-            wisp.Post -> run_task_now(id, ctx)
-            _ -> wisp.method_not_allowed([wisp.Post])
+            http.Post -> run_task_now(id, ctx)
+            _ -> wisp.method_not_allowed([http.Post])
           }
       }
 
@@ -92,8 +92,8 @@ pub fn handle_request(req: Request, ctx: Context) -> Response {
         Error(_) -> bad_request("Invalid task id")
         Ok(id) ->
           case req.method {
-            wisp.Post -> deploy_contract(id, ctx)
-            _ -> wisp.method_not_allowed([wisp.Post])
+            http.Post -> deploy_contract(id, ctx)
+            _ -> wisp.method_not_allowed([http.Post])
           }
       }
 

@@ -28,7 +28,7 @@ pub fn main() {
 
   let port =
     envoy.get("PORT")
-    |> result.then(int.parse)
+    |> result.try(int.parse)
     |> result.unwrap(8080)
 
   let db_path = envoy.get("DB_PATH") |> result.unwrap("./oracle.db")
@@ -76,13 +76,15 @@ pub fn main() {
   // Build the Wisp request handler
   let ctx = router.Context(db: conn)
   let handler = fn(req) { router.handle_request(req, ctx) }
+  
+  let secret_key_base = wisp.random_string(64)
 
   // Start the HTTP server
   let assert Ok(_) =
-    wisp_mist.handler(handler, wisp.make_secret_key_base(64))
+    wisp_mist.handler(handler, secret_key_base)
     |> mist.new
     |> mist.port(port)
-    |> mist.start_http
+    |> mist.start
 
   io.println(
     "[oracle] HTTP API listening on http://localhost:"
